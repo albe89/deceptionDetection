@@ -11,6 +11,7 @@ from keras.layers import LSTM
 from keras.layers import TimeDistributed
 from keras.layers.core import Dense, Dropout, Flatten
 from keras.layers.convolutional import Conv3D, MaxPooling3D, ZeroPadding3D
+from keras.callbacks import ModelCheckpoint, EarlyStopping
 import tensorflow as tf
 import keras.backend as K
 from sklearn.model_selection import StratifiedKFold,GroupKFold,GroupShuffleSplit
@@ -19,14 +20,16 @@ import math
 def train_model(model,videoData,k,batch_size):
     with h5py.File(videoData, "r") as video_data:
          sample_count = int(video_data["y"].shape[0])
+         #sample_count = 50
          sample_idxs = range(0, sample_count)
          seed = 8000
          groups = np.array(video_data['group'])
          #sample_idxs = np.random.permutation(sample_idxs)    
          kf = GroupShuffleSplit(n_splits=k,random_state =seed,test_size=0.20)
+         foldCount = 0
          for train_index, test_index in kf.split(sample_idxs ,groups=groups): #divide train and test in k different folds accroding to groups
               #divice once train and validation according to groups
-              train, val = next(GroupShuffleSplit(random_state = seed,test_size=0.3).split(train_index, groups=groups[train_index]))
+              train, val = next(GroupShuffleSplit(random_state = seed,test_size=0.2).split(train_index, groups=groups[train_index]))
               train_idx = train_index[train]
               val_idx = train_index[val]
               training_sequence_generator = generate_training_sequences(batch_size=batch_size,
@@ -35,20 +38,46 @@ def train_model(model,videoData,k,batch_size):
               val_sequence_generator = generate_val_sequences(batch_size=batch_size,
                                                                        video_data=video_data,
                                                                        test_sample_idxs=val_idx)
-              model.fit_generator(generator=training_sequence_generator,
+              test_sequence_generator = generate_test_sequences(batch_size=batch_size,
+                                                                       video_data=video_data,
+                                                                       test_sample_idxs=test_index)
+              '''
+              for item in training_sequence_generator:
+                  print (item.shape)
+                  print (item)
+              exit()
+              '''
+              es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=2)
+              checkpointer = ModelCheckpoint(filepath='/home/atilocca/deceptionDetection/weightsC3Dbaseline'+str(foldCount).zfill(3)+'.hdf5', verbose=1, save_best_only=True)
+              history = model.fit_generator(generator=training_sequence_generator,
                              validation_data=val_sequence_generator,
                              steps_per_epoch=math.ceil(len(train_idx)//batch_size),
                              validation_steps=len(val_idx),
-                             epochs=1,
+                             epochs=5,
                              verbose=2,
-                             class_weight=None
-                             
+                             class_weight=None,
+                             callbacks=[es,checkpointer]
                             )
             #shuffle=True,  
             
-              exit()   
-           
-
+              model.load_weights('/home/atilocca/deceptionDetection/weightsC3Dbaseline'+str(foldCount).zfill(3)+'.hdf5') 
+              scores = model.evaluate_generator(test_sequence_generator, steps = len(test_index))
+              acc = history.history['acc']
+              val_acc = history.history['val_acc']
+              loss = history.history['loss']
+              val_loss = history.history['val_loss']
+              print ('train acc:')
+              print (acc)
+              print ('val_acc:')
+              print (val_acc)
+              print ('loss:')
+              print (loss)
+              print ('val_loss:')
+              print (val_loss)
+              print ('-----------------SCORES--------------')
+              print (scores)
+              print ('-------------------------------------')
+              foldCount +=1
 def generate_training_sequences(batch_size, video_data, training_sample_idxs):
     """ Generates training sequences on demand
     """
@@ -76,7 +105,9 @@ def generate_training_sequences(batch_size, video_data, training_sample_idxs):
             #add augmentation somehow
             X = video_data["X"][batch_idxs]#,1000:1016]#/255
             Y = video_data["y"][batch_idxs]
-            yield (np.array(X), np.array(Y))
+            x = np.array(X)/255.0
+            yield (x.astype(np.float16), np.array(Y))
+            
 
 def generate_val_sequences(batch_size, video_data, test_sample_idxs):
     """ Generates validation sequences on demand
@@ -98,32 +129,56 @@ def generate_val_sequences(batch_size, video_data, test_sample_idxs):
 
             X = video_data["X"][batch_idxs]#,1000:1016]
             Y = video_data["y"][batch_idxs]
-            yield (np.array(X), np.array(Y))
+            x = np.array(X)/255.0
+            yield (x.astype(np.float16), np.array(Y))
+                                
+def generate_test_sequences(batch_size, video_data, test_sample_idxs):
+    """ Generates test sequences on demand
+    """
+    while True:
+        
+        test_sample_count = len(test_sample_idxs)
+        batches = int(test_sample_count/batch_size)
+        remainder_samples = test_sample_count%batch_size
+        if remainder_samples:
+            batches = batches + 1
+        # generate batches of samples
+        for idx in range(0, batches):
+            if idx == batches - 1:
+                batch_idxs = test_sample_idxs[idx*batch_size:]
+            else:
+                batch_idxs = test_sample_idxs[idx*batch_size:idx*batch_size+batch_size]
+            batch_idxs = sorted(batch_idxs)
+
+            X = video_data["X"][batch_idxs]#,1000:1016]
+            Y = video_data["y"][batch_idxs]
+            x = np.array(X)/255.0
+            yield (x.astype(np.float16), np.array(Y))
  
 def buildModel():
     if K.image_data_format() == 'channels_last':
-        shape = (400,112,112,3)
+        shape = (150,112,112,3)
     else:
-        shape = (3,400,112,112)
+        shape = (3,150,112,112)
     model = Sequential()
-    model.add(Conv3D(64, 3, activation='relu', padding='same', name='conv1', input_shape=shape))
-    model.add(MaxPooling3D(pool_size=(1,2,2), strides=(1,2,2), padding='same', name='pool1'))
+    model.add(Conv3D(64, 3, activation='relu', padding='valid', name='conv1', input_shape=shape))
+    model.add(MaxPooling3D(pool_size=(1,2,2), strides=(1,2,2), padding='valid', name='pool1'))
     
-    model.add(Conv3D(128, 3, activation='relu', padding='same', name='conv2'))
-    model.add(MaxPooling3D(pool_size=(2,2,2), strides=(2,2,2), padding='valid', name='pool2'))
+    #model.add(Conv3D(128, 3, activation='relu', padding='valid', name='conv2'))
+    #model.add(MaxPooling3D(pool_size=(2,2,2), strides=(2,2,2), padding='valid', name='pool2'))
     
-    model.add(Conv3D(256, 3, activation='relu', padding='same', name='conv3a'))
-    model.add(Conv3D(256, 3, activation='relu', padding='same', name='conv3b'))
-    model.add(MaxPooling3D(pool_size=(2,2,2), strides=(2,2,2), padding='valid', name='pool3'))
+    #model.add(Conv3D(256, 3, activation='relu', padding='same', name='conv3a'))
+    #model.add(Conv3D(256, 3, activation='relu', padding='same', name='conv3b'))
+    #model.add(MaxPooling3D(pool_size=(2,2,2), strides=(2,2,2), padding='valid', name='pool3'))
     
-    model.add(Conv3D(512, 3, activation='relu', padding='same', name='conv4a'))
-    model.add(Conv3D(512, 3, activation='relu', padding='same', name='conv4b'))
-    model.add(MaxPooling3D(pool_size=(2,2,2), strides=(2,2,2), padding='valid', name='pool4'))
+    #model.add(Conv3D(512, 3, activation='relu', padding='same', name='conv4a'))
+    #model.add(Conv3D(512, 3, activation='relu', padding='same', name='conv4b'))
+    #model.add(MaxPooling3D(pool_size=(2,2,2), strides=(2,2,2), padding='valid', name='pool4'))
     
-    model.add(Conv3D(512, 3, activation='relu', padding='same', name='conv5a'))
-    model.add(Conv3D(512, 3, activation='relu', padding='same', name='conv5b'))
-    model.add(ZeroPadding3D(padding=(0,1,1)))
-    model.add(MaxPooling3D(pool_size=(2,2,2), strides=(2,2,2), padding='valid', name='pool5'))
+    #model.add(Conv3D(512, 3, activation='relu', padding='same', name='conv5a'))
+    #model.add(Conv3D(512, 3, activation='relu', padding='same', name='conv5b'))
+    #model.add(ZeroPadding3D(padding=(0,1,1)))
+    #model.add(MaxPooling3D(pool_size=(2,2,2), strides=(2,2,2), padding='valid', name='pool5'))
     model.add(GlobalMaxPooling3D(name='gmp'))
     model.add(Dense(1, activation='sigmoid'))
    
@@ -145,12 +200,12 @@ def buildModel():
     return model
 
 if __name__ == "__main__":
-    videoData="/home/atilocca/deceptionDetection/datasets/PS_datasetChunks.hdf5"
+    videoData="/home/atilocca/deceptionDetection/datasets/PS_datasetChunks150Frames.hdf5"
     folds= 10
     batch_size  = 2
     model = buildModel()
-    train_model(model,videoData,folds,batch_size)
-    exit()
-    
     print (model.summary())
-    train_model(model)
+    train_model(model,videoData,folds,batch_size)
+    
+    
+  
