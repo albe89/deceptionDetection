@@ -21,7 +21,7 @@ import pandas as pd
 def train_model(model,dataFrame,k,batch_size):
     #with h5py.File(videoData, "r") as video_data:
          sample_count =  len(dataframe.index)
-         sample_count = 50
+         #sample_count = 50
          #sample_idxs = list(range(0, sample_count))
          
          sample_idxs = np.random.RandomState(seed=seed).permutation(sample_count)
@@ -43,30 +43,7 @@ def train_model(model,dataFrame,k,batch_size):
               trainID = dataframe.iloc[(train_idx)]['ID'].values.tolist()
               valID = dataframe.iloc[(val_idx)]['ID'].values.tolist()
               testID = dataframe.iloc[(testIDX)]['ID'].values.tolist()
-              '''
-              print ('train')
-              print (len(trainID))
-              print (trainID)
-              print ('valID')
-              print (len(valID))
-              print (valID)
-              print ('testID')
-              print (len(testID))
-              print (testID)
-              exit()
-              '''
-              '''
-              training_sequence_generator = generate_training_sequences(batch_size=batch_size,
-                                                                   video_data=video_data,
-                                                                   training_sample_idxs=train_idx)
-              val_sequence_generator = generate_val_sequences(batch_size=batch_size,
-                                                                       video_data=video_data,
-                                                                       test_sample_idxs=val_idx)
-              test_sequence_generator = generate_test_sequences(batch_size=batch_size,
-                                                                       video_data=video_data,
-                                                                       test_sample_idxs=test_index)
-             
-              '''
+
               training_sequence_generator = DataGenerator(list_IDs=trainID, batch_size=batch_size)
               val_sequence_generator = DataGenerator(list_IDs=valID, batch_size=batch_size)
               test_sequence_generator = DataGenerator(list_IDs=testID, batch_size=batch_size)
@@ -105,84 +82,7 @@ def train_model(model,dataFrame,k,batch_size):
               print (scores)
               print ('-------------------------------------')
               foldCount +=1
-'''
-def generate_training_sequences(batch_size, video_data, training_sample_idxs):
-    """ Generates training sequences on demand
-    """
-    print ('generate training sequences') 
-    while True:
-        # generate sequences for training
-        
-        training_sample_count = len(training_sample_idxs)
-        batches = int(training_sample_count/batch_size)
-        remainder_samples = training_sample_count%batch_size
-        print ('tr sample:', training_sample_count)
-        
-        if remainder_samples:
-            batches = batches + 1
-        # generate batches of samples
-        for idx in range(0, batches):
-            print (idx)
-            if idx == batches - 1:
-                batch_idxs = training_sample_idxs[idx*batch_size:]
-            else:
-                batch_idxs = training_sample_idxs[idx*batch_size:idx*batch_size+batch_size]
-            batch_idxs = sorted(batch_idxs)
-            #print video_data["X"][0][:200].shape
-            #print video_data["X"][0].shape
-            #add augmentation somehow
-            X = video_data["X"][batch_idxs]#,1000:1016]#/255
-            Y = video_data["y"][batch_idxs]
-            x = np.array(X)/255.0
-            yield (x.astype(np.float16), np.array(Y))
-            
 
-def generate_val_sequences(batch_size, video_data, test_sample_idxs):
-    """ Generates validation sequences on demand
-    """
-    while True:
-        
-        test_sample_count = len(test_sample_idxs)
-        batches = int(test_sample_count/batch_size)
-        remainder_samples = test_sample_count%batch_size
-        if remainder_samples:
-            batches = batches + 1
-        # generate batches of samples
-        for idx in range(0, batches):
-            if idx == batches - 1:
-                batch_idxs = test_sample_idxs[idx*batch_size:]
-            else:
-                batch_idxs = test_sample_idxs[idx*batch_size:idx*batch_size+batch_size]
-            batch_idxs = sorted(batch_idxs)
-
-            X = video_data["X"][batch_idxs]#,1000:1016]
-            Y = video_data["y"][batch_idxs]
-            x = np.array(X)/255.0
-            yield (x.astype(np.float16), np.array(Y))
-                                
-def generate_test_sequences(batch_size, video_data, test_sample_idxs):
-    """ Generates test sequences on demand
-    """
-    while True:
-        
-        test_sample_count = len(test_sample_idxs)
-        batches = int(test_sample_count/batch_size)
-        remainder_samples = test_sample_count%batch_size
-        if remainder_samples:
-            batches = batches + 1
-        # generate batches of samples
-        for idx in range(0, batches):
-            if idx == batches - 1:
-                batch_idxs = test_sample_idxs[idx*batch_size:]
-            else:
-                batch_idxs = test_sample_idxs[idx*batch_size:idx*batch_size+batch_size]
-            batch_idxs = sorted(batch_idxs)
-
-            X = video_data["X"][batch_idxs]#,1000:1016]
-            Y = video_data["y"][batch_idxs]
-            x = np.array(X)/255.0
-            yield (x.astype(np.float16), np.array(Y))
-'''
  
 def buildModel():
     if K.image_data_format() == 'channels_last':
@@ -211,20 +111,7 @@ def buildModel():
     model.add(GlobalMaxPooling3D(name='gmp'))
     model.add(Dense(1, activation='sigmoid'))
    
-    
-    '''
-    nm = Sequential()
-    #base_model = C3D(weights='sports1M')
-    base_model = C3D(weights=None)
-    model = Model(inputs=base_model.input, outputs=base_model.get_layer('conv1').output)
-    for layer in model.layers:
-        #layer.trainable = False
-        nm.add(layer)
- 
-    nm.add(GlobalMaxPooling3D(name='gmp'))
-    #nm.add(Dense(256, activation='relu',name='fc7'))
-    model.add(Dense(1, activation='sigmoid'))
-    '''
+   
     model.compile(loss='binary_crossentropy', optimizer=Adam(lr=0.0001), metrics=['accuracy'])
     return model
 
@@ -279,7 +166,7 @@ class DataGenerator(keras.utils.Sequence):
             #X[i,] = self.videoData["X"][ID,0:150]/255.0
             #dir file
             location = dataframe.loc[dataframe['ID']==ID]['filelocation'].values[0]
-            X[i,] = np.load(location+ '.npz')['x']
+            X[i,] = np.load(location+ '.npz')['x']/255.0
             # Store class
             y[i] = dataframe.loc[dataframe['ID']==ID]['label'].values[0]
 
